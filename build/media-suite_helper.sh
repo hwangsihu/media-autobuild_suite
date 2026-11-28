@@ -1572,7 +1572,7 @@ do_hide_pacman_sharedlibs() {
     local revert="$2"
     shift 2
     set -- $packages
-    set -- $(pacman -Qql "$@" 2> /dev/null | grep .dll.a)
+    set -- $(pacman -Qql "$@" 2> /dev/null | grep '\.dll\.a$')
 
     for file in "$@"; do
         if [[ -f "${file%*.dll.a}.a" ]]; then
@@ -1589,67 +1589,80 @@ do_hide_pacman_sharedlibs() {
 
 do_hide_all_sharedlibs() {
     local dryrun="${dry:-n}"
-    local files
-    files="$(find /{clang64,ucrt64}/lib /{clang64/x86_64,ucrt64/x86_64}-w64-mingw32/lib -name "*.dll.a" 2> /dev/null)"
-    local tomove=()
-    for file in $files; do
-        [[ -f ${file%*.dll.a}.a ]] && tomove+=("$file")
-    done
-    if [[ -n ${tomove[*]} ]]; then
-        if [[ $dryrun == "n" ]]; then
-            printf '%s\0' "${tomove[@]}" | xargs -0ri mv -f '{}' '{}.dyn'
-        else
-            printf '%s\n' "${tomove[@]}"
-        fi
+    local file tomove=()
+    while IFS= read -r -d '' file; do
+        [[ -f ${file%.dll.a}.a ]] && tomove+=("$file")
+    done < <(find /{clang64,ucrt64}/lib /{clang64/x86_64,ucrt64/x86_64}-w64-mingw32/lib \
+        -name "*.dll.a" -print0 2> /dev/null)
+    ((${#tomove[@]})) || return 0
+    if [[ $dryrun == "n" ]]; then
+        printf '%s\0' "${tomove[@]}" | xargs -0 rename -l .dll.a .dll.a.dyn
+    else
+        printf '%s\n' "${tomove[@]}"
     fi
 }
 
 do_unhide_all_sharedlibs() {
     local dryrun="${dry:-n}"
-    local files
-    files="$(find /{ucrt64,clang64}/lib /{ucrt64/x86_64,clang64/x86_64}-w64-mingw32/lib -name "*.dll.a.dyn" 2> /dev/null)"
-    local tomove=()
-    local todelete=()
-    for file in $files; do
-        if [[ -f ${file%*.dyn} ]]; then
+    local file tomove=() todelete=()
+    while IFS= read -r -d '' file; do
+        if [[ -f ${file%.dyn} ]]; then
             todelete+=("$file")
         else
-            tomove+=("${file%*.dyn}")
+            tomove+=("$file")
         fi
-    done
+    done < <(find /{ucrt64,clang64}/lib /{ucrt64/x86_64,clang64/x86_64}-w64-mingw32/lib \
+        -name "*.dll.a.dyn" -print0 2> /dev/null)
     if [[ $dryrun == "n" ]]; then
-        printf '%s\n' "${todelete[@]}" | xargs -ri rm -f '{}'
-        printf '%s\n' "${tomove[@]}" | xargs -ri mv -f '{}.dyn' '{}'
+        ((${#todelete[@]})) && printf '%s\0' "${todelete[@]}" | xargs -0 rm -f
+        ((${#tomove[@]})) && printf '%s\0' "${tomove[@]}" | xargs -0 rename -l .dll.a.dyn .dll.a
     else
-        printf 'rm %s\n' "${todelete[@]}"
-        printf '%s\n' "${tomove[@]}"
+        ((${#todelete[@]})) && printf 'rm %s\n' "${todelete[@]}"
+        ((${#tomove[@]})) && printf '%s\n' "${tomove[@]%.dyn}"
     fi
+    return 0
+}
+
+# exact name only, reads the local db directly since each pacman start takes ~0.5s
+pacman_db_has_pkg() {
+    local entry db=/var/lib/pacman/local
+    for entry in "$db/$1"-*; do
+        [[ ${entry#"$db/$1"-} =~ ^[^-]+-[^-]+$ && -f $entry/desc ]] && return 0
+    done
+    return 1
 }
 
 do_pacman_resolve_pkgs() (
     : "${prefix=$MINGW_PACKAGE_PREFIX-}"
-    # Prefer exact matches, then provides
-    pkg=$(pacsift --exact --sync --any "${@/#/--name=$prefix}" 2> /dev/null)
-    [[ -z $pkg ]] && pkg=$(pacsift --exact --sync --any "${@/#/--provides=$prefix}" 2> /dev/null)
-    if [[ -z $pkg ]]; then
-        do_simple_print "${red}Failed to resolve pacman package '$prefix$1'.${reset}" >&2
-        return 1
+    ret=0
+    if ! out=$(pacman -Sddp --noconfirm --print-format '%n' "${@/#/$prefix}" 2> /dev/null); then
+        out=
+        for pkg; do
+            if res=$(pacman -Sddp --noconfirm --print-format '%n' "$prefix$pkg" 2> /dev/null); then
+                out+=$res$'\n'
+            else
+                do_simple_print "${red}Failed to resolve pacman package '$prefix$pkg'.${reset}" >&2
+                ret=1
+            fi
+        done
     fi
-    echo "${pkg#*/"$prefix"}"
+    while read -r pkg; do
+        [[ -n $pkg && $pkg != *[[:space:]]* ]] && printf '%s\n' "${pkg#"$prefix"}"
+    done <<< "$out"
+    return $ret
 )
 
 is_pkg_installed() (
     : "${prefix=$MINGW_PACKAGE_PREFIX-}"
     # checks if a package is installed/provided by a package that is installed
     # example is omp, which is purely a provided packge, so that fails with pacman -Qe
-    pacsift --exact --local --any --exists --provides="$prefix$1" --name="$prefix$1" > /dev/null 2>&1
+    pacman_db_has_pkg "$prefix$1" || pacman -T "$prefix$1" > /dev/null 2>&1
 )
 
 do_pacman_install() (
     ret=true
     prefix=$MINGW_PACKAGE_PREFIX-
     file=/etc/pac-mingw-extra.pk
-    pkgs=()
     while true; do
         case "$1" in
         -m)
@@ -1660,35 +1673,66 @@ do_pacman_install() (
         *) break ;;
         esac
     done
-    for pkg; do
-        resolved=$(do_pacman_resolve_pkgs "$pkg") || return 1
-        for line in $resolved; do
-            if ! is_pkg_installed "$line"; then
-                pkgs+=("$line")
-            fi
-        done
-    done
 
-    for pkg in "${pkgs[@]}"; do
-        do_simple_print -n "Installing $pkg... "
-        if pacman -S \
-            --noconfirm --ask=20 --needed \
+    missing=()
+    for pkg; do
+        pacman_db_has_pkg "$prefix$pkg" || missing+=("$prefix$pkg")
+    done
+    ((${#missing[@]})) || return 0
+    out=$(pacman -T "${missing[@]}" 2> /dev/null)
+    case $? in
+    0) return 0 ;;
+    127) mapfile -t missing <<< "$out" ;;
+    esac
+
+    resolved=$(do_pacman_resolve_pkgs "${missing[@]#"$prefix"}") || ret=false
+    pkgs=()
+    while read -r pkg; do
+        [[ -n $pkg ]] && ! pacman_db_has_pkg "$prefix$pkg" && pkgs+=("$pkg")
+    done < <(printf '%s' "$resolved" | sort -u)
+    ((${#pkgs[@]})) || {
+        $ret
+        return
+    }
+
+    _install() {
+        pacman -S --noconfirm --ask=20 --needed \
             --overwrite "/usr/*" \
             --overwrite "/ucrt64/*" \
             --overwrite "/mingw64/*" \
             --overwrite "/mingw32/*" \
             --overwrite "/clang64/*" \
-            "$prefix$pkg" > /dev/null 2>&1; then
-            pacman -D --asexplicit "$prefix$pkg" > /dev/null 2>&1
-            echo "$pkg" >> $file
-            echo "done"
-        else
-            ret=false
-            echo "failed"
-        fi
-    done
-    sort -uo $file{,} > /dev/null 2>&1
-    do_hide_all_sharedlibs
+            "${@/#/$prefix}" > /dev/null 2>&1
+    }
+    installed=()
+    do_simple_print -n "Installing ${pkgs[*]}... "
+    if _install "${pkgs[@]}"; then
+        installed=("${pkgs[@]}")
+        echo "done"
+    elif ((${#pkgs[@]} == 1)); then
+        ret=false
+        echo "failed"
+    else
+        echo "failed, retrying one by one"
+        for pkg in "${pkgs[@]}"; do
+            do_simple_print -n "Installing $pkg... "
+            if _install "$pkg"; then
+                installed+=("$pkg")
+                echo "done"
+            else
+                ret=false
+                echo "failed"
+            fi
+        done
+    fi
+
+    if ((${#installed[@]})); then
+        # -S --asexplicit would mark the pulled in dependencies explicit too
+        pacman -D --asexplicit "${installed[@]/#/$prefix}" > /dev/null 2>&1
+        printf '%s\n' "${installed[@]}" >> "$file"
+        sort -uo "$file"{,} > /dev/null 2>&1
+        do_hide_all_sharedlibs
+    fi
     $ret
 )
 
@@ -1696,7 +1740,6 @@ do_pacman_remove() (
     ret=true
     prefix=$MINGW_PACKAGE_PREFIX-
     file=/etc/pac-mingw-extra.pk
-    pkgs=()
     while true; do
         case "$1" in
         -m)
@@ -1707,28 +1750,38 @@ do_pacman_remove() (
         *) break ;;
         esac
     done
-    for pkg; do
-        for line in $(do_pacman_resolve_pkgs "$pkg"); do
-            if is_pkg_installed "$line"; then
-                pkgs+=("$line")
-            fi
-        done
-    done
 
-    for pkg in "${pkgs[@]}"; do
-        sed -i "/^${pkg}$/d" "$file" > /dev/null 2>&1
-        do_simple_print -n "Uninstalling $pkg... "
-        do_hide_pacman_sharedlibs "$prefix$pkg" revert
-        if pacman -Rs --noconfirm --ask=20 "$prefix$pkg" > /dev/null 2>&1; then
-            echo "done"
-        else
-            ret=false
-            pacman -D --asdeps "$prefix$pkg" > /dev/null 2>&1
-            echo "failed"
-        fi
+    pkgs=()
+    for pkg; do
+        pacman_db_has_pkg "$prefix$pkg" && pkgs+=("$prefix$pkg")
     done
-    sort -uo "$file"{,} > /dev/null 2>&1
-    do_hide_all_sharedlibs
+    ((${#pkgs[@]})) || return 0
+
+    if [[ -f $file ]]; then
+        grep -vxF -f <(printf '%s\n' "${pkgs[@]#"$prefix"}") "$file" > "$file.new"
+        mv -f "$file.new" "$file"
+    fi
+
+    do_simple_print -n "Uninstalling ${pkgs[*]#"$prefix"}... "
+    mapfile -t removing < <(pacman -Rsu -p --print-format '%n' "${pkgs[@]}" 2> /dev/null |
+        grep -v '[[:space:]]')
+    if ((${#removing[@]})); then
+        do_hide_pacman_sharedlibs "${removing[*]}" revert
+        pacman -Rnsu --noconfirm --ask=20 "${pkgs[@]}" > /dev/null 2>&1 ||
+            do_hide_all_sharedlibs
+    fi
+
+    kept=()
+    for pkg in "${pkgs[@]}"; do
+        pacman_db_has_pkg "$pkg" && kept+=("$pkg")
+    done
+    if ((${#kept[@]})); then
+        pacman -D --asdeps "${kept[@]}" > /dev/null 2>&1
+        echo "failed, still needed: ${kept[*]#"$prefix"}"
+        ret=false
+    else
+        echo "done"
+    fi
     $ret
 )
 

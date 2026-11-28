@@ -1832,10 +1832,8 @@ if not exist %instdir%\msys64\usr\bin\make.exe (
     (
         echo.echo -ne "\033]0;install base system\007"
         echo.msysbasesystem="$(cat /etc/pac-base.pk | tr '\n\r' '  ')"
-        echo.[[ "$(uname)" = *6.1* ]] ^&^& nargs="-n 4"
-        echo.echo $msysbasesystem ^| xargs $nargs pacman -Sw --noconfirm --ask=20 --needed
-        echo.echo $msysbasesystem ^| xargs $nargs pacman -S --noconfirm --ask=20 --needed
-        echo.echo $msysbasesystem ^| xargs $nargs pacman -D --asexplicit
+        echo.pacman -S --noconfirm --ask=20 --needed $msysbasesystem
+        echo.pacman -D --asexplicit $msysbasesystem
         echo.sleep ^3
         echo.exit
     )>%build%\pacman.sh
@@ -1901,11 +1899,13 @@ if defined needsupdate (
     powershell -noprofile -command "[datetimeoffset]::now.tounixtimeseconds()" > %instdir%\build\updated.log
 )
 
+set "corepkgs=bash pacman msys2-runtime"
+if exist "%build%\update_core" for /f "usebackq delims=" %%a in ("%build%\update_core") do set "corepkgs=%%a"
 if exist "%build%\update_core" (
     echo.-------------------------------------------------------------------------------
     echo.critical updates
     echo.-------------------------------------------------------------------------------
-    pacman -S --needed --noconfirm --ask=20 --asdeps bash pacman msys2-runtime
+    pacman -S --needed --noconfirm --ask=20 --asdeps %corepkgs%
     del "%build%\update_core"
 )
 
@@ -2140,9 +2140,7 @@ if %CC%==clang (
 )
 (
     echo.printf '\033]0;install 64-bit compiler\007'
-    echo.[[ "$(uname)" = *6.1* ]] ^&^& nargs="-n 4"
-    echo.sed 's/^^/%prefix%/g' /etc/pac-mingw.pk ^| xargs $nargs pacman -Sw --noconfirm --ask=20 --needed
-    echo.sed 's/^^/%prefix%/g' /etc/pac-mingw.pk ^| xargs $nargs pacman -S --noconfirm --ask=20 --needed
+    echo.sed 's/^^/%prefix%/g' /etc/pac-mingw.pk ^| xargs pacman -S --noconfirm --ask=20 --needed
     echo.sleep 3
     echo.exit
 )>%build%\mingw.sh

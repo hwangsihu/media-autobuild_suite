@@ -82,41 +82,42 @@ echo
 pacman -Sy --ask=20 --noconfirm
 do_unhide_all_sharedlibs
 
-have_updates="$(pacman -Qu | grep -v ignored]$ | cut -d' ' -f1)"
-if [[ -n $have_updates ]]; then
+overwrite=(--overwrite "/mingw64/*" --overwrite "/mingw32/*" --overwrite "/clang64/*"
+    --overwrite "/ucrt64/*" --overwrite "/usr/*")
+# a -Su with any of these pending makes MSYS2's pacman kill all MSYS2 processes, this script included
+core_pkgs='^(bash|filesystem|mintty|msys2-runtime(-.*)?|pacman|pacman-mirrors)$'
+updates=()
+core_updates=()
+while read -r pkg _ _ _ ignored; do
+    [[ -z $pkg || $ignored == "[ignored]" ]] && continue
+    if [[ $pkg =~ $core_pkgs ]]; then
+        core_updates+=("$pkg")
+    else
+        updates+=("$pkg")
+    fi
+done < <(pacman -Qu 2> /dev/null)
+
+if ((${#updates[@]} + ${#core_updates[@]})); then
     echo "-------------------------------------------------------------------------------"
     echo "Updating msys2 system and installed packages..."
     echo "-------------------------------------------------------------------------------"
-    grep -Eq '^(pacman|bash|msys2-runtime)$' <<< "$have_updates" &&
-        touch /build/update_core &&
-        have_updates="$(grep -Ev '^(pacman|bash|msys2-runtime)$' <<< "$have_updates")"
-    mapfile -t updates <<< "$have_updates"
-    [[ -n $have_updates ]] && pacman -S --noconfirm --needed --overwrite "/mingw64/*" \
-        --overwrite "/mingw32/*" --overwrite "/clang64/*" --overwrite "/ucrt64/*" --overwrite "/usr/*" "${updates[@]}"
 fi
-
-# do an overall installation for potential downgrades
-pacman -Syuu --noconfirm --overwrite "/mingw64/*" \
-    --overwrite "/mingw32/*" --overwrite "/clang64/*" --overwrite "/ucrt64/*" --overwrite "/usr/*"
+if ((${#core_updates[@]})); then
+    echo "${core_updates[*]}" > /build/update_core
+    ((${#updates[@]})) && pacman -S --noconfirm --needed "${overwrite[@]}" "${updates[@]}"
+else
+    # do an overall installation for potential downgrades
+    pacman -Suu --noconfirm "${overwrite[@]}"
+fi
 
 # -------------------------------------------------------------------------------
 # check packages
 # -------------------------------------------------------------------------------
 
-# make sure that pacutils is always installed for pacsift
-{ pacman -Qq pacutils || pacman -S --needed --noconfirm pacutils; } > /dev/null 2>&1
-
 extract_pkg_prefix() (
     . shell "$1"
     echo "$MINGW_PACKAGE_PREFIX-"
 )
-
-add_pkg_group() {
-    local packages
-    packages=$(pacman -Sgq "$1" 2> /dev/null)
-    [[ -n $packages ]] || return 1
-    printf '%s\n' "$packages" >> "$new"
-}
 
 if [[ -f /etc/pac-base.pk && -f /etc/pac-mingw.pk ]]; then
     new=$(mktemp)
@@ -126,36 +127,39 @@ if [[ -f /etc/pac-base.pk && -f /etc/pac-mingw.pk ]]; then
     echo "Checking pacman packages..."
     echo "-------------------------------------------------------------------------------"
     echo
-    mapfile -t newmingw < <(dos2unix -O /etc/pac-mingw.pk /etc/pac-mingw-extra.pk 2>/dev/null | sort -u)
-    mapfile -t newmsys < <(dos2unix -O /etc/pac-base.pk /etc/pac-msys-extra.pk 2> /dev/null | sort -u)
     case $CC in
     *clang) prefix=$(extract_pkg_prefix clang64) ;;
     *) prefix=$(extract_pkg_prefix ucrt64) ;;
     esac
-    for pkg in "${newmingw[@]}"; do
-        add_pkg_group "$prefix$pkg" || {
-            pacman -Ss "$prefix$pkg" > /dev/null 2>&1 &&
-            printf '%s\n' "$prefix$pkg" >> "$new"
-        }
-    done
-    for pkg in "${newmsys[@]}"; do
-        add_pkg_group "$pkg" || {
-            pacman -Ss "^${pkg}$" > /dev/null 2>&1 && printf '%s\n' "$pkg" >> "$new"
-        }
-    done
-    pacman -Qqe | sort -u >> "$old"
-    sort -uo "$new"{,}
-    # mapfile -t new < <(printf %s\\n "${new[@]}" | sort -u)
-    mapfile -t install < <(diff --changed-group-format='%>' --unchanged-group-format='' "$old" "$new")
-    mapfile -t uninstall < <(diff --changed-group-format='%<' --unchanged-group-format='' "$old" "$new")
+    {
+        pacman -Sgg | sed 's/^/G /'
+        pacman -Slq | sed 's/^/P /'
+        dos2unix -O /etc/pac-mingw.pk /etc/pac-mingw-extra.pk 2> /dev/null | sed "/^\s*$/d;s/^/W $prefix/"
+        dos2unix -O /etc/pac-base.pk /etc/pac-msys-extra.pk 2> /dev/null | sed '/^\s*$/d;s/^/W /'
+    } | awk '
+        $1 == "G" { members[$2] = members[$2] " " $3; next }
+        $1 == "P" { known[$2] = 1; next }
+        $1 == "W" {
+            if ($2 in members) {
+                n = split(members[$2], pkgs, " ")
+                for (i = 1; i <= n; i++) print pkgs[i]
+            } else if ($2 in known) print $2
+            else print "Package " $2 " was not found in the repos, skipping it." > "/dev/stderr"
+        }' | LC_ALL=C sort -u > "$new"
+    pacman -Qqe | LC_ALL=C sort -u > "$old"
+    mapfile -t install < <(LC_ALL=C comm -13 "$old" "$new")
+    mapfile -t uninstall < <(LC_ALL=C comm -23 "$old" "$new")
 
-    if [[ ${#install[@]} -gt 0 ]]; then
-        echo "You're missing some packages!"
-        echo "Proceeding with installation..."
-        pacman -S --noconfirm --needed "${install[@]}"
-        pacman -D --asexplicit "${install[@]}"
+    if ((${#install[@]})); then
+        mapfile -t missing < <(pacman -Qq | LC_ALL=C sort -u | LC_ALL=C comm -13 - "$new")
+        if ((${#missing[@]})); then
+            echo "You're missing some packages!"
+            echo "Proceeding with installation..."
+            pacman -S --noconfirm --needed "${missing[@]}"
+        fi
+        pacman -D --asexplicit "${install[@]}" > /dev/null
     fi
-    [[ ${#uninstall[@]} -gt 0 ]] && pacman --noconfirm -D --asdeps "${uninstall[@]}"
+    ((${#uninstall[@]})) && pacman --noconfirm -D --asdeps "${uninstall[@]}" > /dev/null
     mapfile -t orphans < <(pacman -Qqdtt)
     if [[ ${#orphans[@]} -gt 0 ]]; then
         echo
@@ -167,10 +171,10 @@ if [[ -f /etc/pac-base.pk && -f /etc/pac-mingw.pk ]]; then
         echo "Remove:"
         printf '%s\n' "${orphans[@]}"
         while true; do
-            read -r -p "remove packs [y/n]? " yn
+            read -r -p "remove packs [y/n]? " yn || break
             case $yn in
             [Yy]*)
-                pacman -Rns --noconfirm "${orphans[@]}" >&2 2> /dev/null
+                pacman -Rns --noconfirm "${orphans[@]}"
                 break
                 ;;
             [Nn]*)
