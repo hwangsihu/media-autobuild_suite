@@ -5,10 +5,8 @@
 ## ignore media-autobuild_suite folders and local specific files
 
 /build/*
-/local32/
 /local64/
 /msys64/
-/msys32/
 
 mintty.lnk
 update_suite.sh

@@ -7,7 +7,6 @@
 1. Path is less than 60 characters.
 2. Path has no spaces.
 3. OS level is Windows 8.1 or above.
-    - Although Windows 7 could work, it is not supported.
 4. Powershell version 4 and above
     - Do not run this script from Powershell Core prior to version 7 as it will fail to download the wget-pack.exe. See [Pull #1021](https://github.com/m-ab-s/media-autobuild_suite/pull/1021)
 5. Make sure to get the latest version of the suite before running anything.

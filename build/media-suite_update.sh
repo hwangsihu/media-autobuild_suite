@@ -82,8 +82,8 @@ echo
 pacman -Sy --ask=20 --noconfirm
 do_unhide_all_sharedlibs
 
-overwrite=(--overwrite "/mingw64/*" --overwrite "/mingw32/*" --overwrite "/clang64/*"
-    --overwrite "/ucrt64/*" --overwrite "/usr/*")
+overwrite=(--overwrite "/mingw64/*" --overwrite "/clang64/*" --overwrite "/ucrt64/*"
+    --overwrite "/usr/*")
 # a -Su with any of these pending makes MSYS2's pacman kill all MSYS2 processes, this script included
 core_pkgs='^(bash|filesystem|mintty|msys2-runtime(-.*)?|pacman|pacman-mirrors)$'
 updates=()

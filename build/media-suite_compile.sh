@@ -1127,7 +1127,6 @@ if [[ $standalone = y ]] && enabled libmp3lame; then
         do_patch "$_mingw_patches_lame/0006-dont-use-outdated-symbol-list.patch"
         do_patch "$_mingw_patches_lame/0008-skip-termcap.patch"
         do_patch "$_mingw_patches_lame/0010-frontend-utf8-id3v2-setters.patch"
-        do_patch "https://raw.githubusercontent.com/m-ab-s/mabs-patches/master/lame/0001-libmp3lame-vector-Makefile.am-Add-msse-to-fix-i686-c.patch"
         do_autoreconf
         do_separate_conf --enable-nasm
         do_make

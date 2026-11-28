@@ -1765,8 +1765,7 @@ set "fstab=%instdir%\msys64\etc\fstab"
 if exist %fstab%. (
     findstr trunk %fstab% >nul 2>&1 || set "removefstab=yes"
     for /f "tokens=1 delims= " %%a in ('findstr trunk %fstab%') do if not [%%a]==[%instdir%\] set "removefstab=yes"
-    findstr local32 %fstab% >nul 2>&1 && set "removefstab=yes"
-    findstr clang32 %fstab% >nul 2>&1 && set "removefstab=yes"
+    findstr /c:" /mingw32 " %fstab% >nul 2>&1 && set "removefstab=yes"
 ) else set removefstab=yes
 
 if not [%removefstab%]==[no] (
@@ -1781,7 +1780,6 @@ if not [%removefstab%]==[no] (
         echo.
         echo.%instdir%\ /trunk ntfs binary,posix=0,noacl,user 0 0
         echo.%instdir%\build\ /build ntfs binary,posix=0,noacl,user 0 0
-        echo.%instdir%\msys64\mingw32\ /mingw32 ntfs binary,posix=0,noacl,user 0 0
         echo.%instdir%\msys64\mingw64\ /mingw64 ntfs binary,posix=0,noacl,user 0 0
         echo.%instdir%\msys64\ucrt64\ /ucrt64 ntfs binary,posix=0,noacl,user 0 0
         echo.%instdir%\msys64\clang64\ /clang64 ntfs binary,posix=0,noacl,user 0 0

@@ -1700,7 +1700,6 @@ do_pacman_install() (
             --overwrite "/usr/*" \
             --overwrite "/ucrt64/*" \
             --overwrite "/mingw64/*" \
-            --overwrite "/mingw32/*" \
             --overwrite "/clang64/*" \
             "${@/#/$prefix}" > /dev/null 2>&1
     }
