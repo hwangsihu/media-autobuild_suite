@@ -123,7 +123,6 @@ declare -A MPV_OPTS
 eval "MPV_OPTS=($(do_getMpvConfig))"
 
 do_fix_pkgconfig_abspaths
-do_clean_old_builds
 
 # In case a build was interrupted before reversing hide_conflicting_libs
 [[ -d $LOCALDESTDIR/opt/cyanffmpeg ]] &&
@@ -1533,8 +1532,6 @@ if { [[ $rav1e = y ]] || [[ $libavif = y ]] || enabled librav1e; } &&
             --release --jobs "$cpuCount" --prefix="$LOCALDESTDIR" \
             --destdir="$PWD/install-$bits"
 
-        # do_install "install-$bits/bin/rav1e.dll" bin-video/
-        # do_install "install-$bits/lib/librav1e.dll.a" lib/
         do_install "$(find "install-$bits/" -name "librav1e.a")" lib/
         do_install "$(find "install-$bits/" -name "rav1e.pc")" lib/pkgconfig/
         sed -i 's/\\/\//g' "$LOCALDESTDIR/lib/pkgconfig/rav1e.pc" >/dev/null 2>&1
@@ -2793,13 +2790,6 @@ if [[ $libheif != n ]] &&
         extracommands+=(-DWITH_VVDEC=ON -DWITH_VVDEC_PLUGIN=OFF)
     { pc_exists "openh264" || pacman -Q $MINGW_PACKAGE_PREFIX-openh264 > /dev/null 2>&1; } &&
         extracommands+=(-DWITH_OpenH264_DECODER=ON -DWITH_OpenH264_DECODER_PLUGIN=OFF)
-
-    # don't fail on .dll.a not found because we hide it
-    # still need to make it link to static lib as it still wants to link to .dll.a and fails
-    # pacman -Q $MINGW_PACKAGE_PREFIX-openjpeg2 > /dev/null 2>&1 &&
-    #     sed -i 's/message(FATAL_ERROR "The imported target/message(WARNING "The imported target/' \
-    #     "$MINGW_PREFIX"/lib/cmake/openjpeg-2.5/OpenJPEGTargets.cmake &&
-    #     extracommands+=(-DWITH_OpenJPEG_{DE,EN}CODER=ON -DWITH_OpenJPEG_{DE,EN}CODER_PLUGIN=OFF)
 
     # linking difficulties
     pc_exists "rav1e" &&

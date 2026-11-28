@@ -1703,7 +1703,6 @@ do_pacman_install() (
         pacman -S --noconfirm --ask=20 --needed \
             --overwrite "/usr/*" \
             --overwrite "/ucrt64/*" \
-            --overwrite "/mingw64/*" \
             --overwrite "/clang64/*" \
             "${@/#/$prefix}" > /dev/null 2>&1
     }
@@ -2259,30 +2258,6 @@ do_fix_pkgconfig_abspaths() {
         xargs -0r grep -LZ "$_root" | \
         # replace with current abspath
         xargs -0r sed -ri "s;${_keys}=.*$LOCALDESTDIR;\1=$_root;g"
-}
-
-do_clean_old_builds() {
-    local _old_libs=(j{config,error,morecfg,peglib}.h
-        lib{jpeg,nettle,gnurx,regex}.{,l}a
-        lib{opencore-amr{nb,wb},twolame,theora{,enc,dec},caca,magic,uchardet}.{,l}a
-        libSDL{,main}.{,l}a libopen{jpwl,mj2,jp2}.{a,pc}
-        include/{nettle,opencore-amr{nb,wb},theora,cdio,SDL,openjpeg-2.{1,2},luajit-2.0,uchardet}
-        regex.h magic.h
-        {nettle,vo-aacenc,sdl,uchardet}.pc
-        {opencore-amr{nb,wb},twolame,theora{,enc,dec},caca,dcadec,libEGL}.pc
-        libcdio_{cdda,paranoia}.{{,l}a,pc}
-        twolame.h bin-audio/{twolame,cd-paranoia}.exe
-        bin-global/{{file,uchardet}.exe,sdl-config,luajit-2.0.4.exe}
-        libebur128.a ebur128.h
-        liburiparser.{{,l}a,pc}
-        libchromaprint.{a,pc} chromaprint.h
-        bin-global/libgcrypt-config libgcrypt.a gcrypt.h
-        lib/libgcrypt.def bin-global/{dumpsexp,hmac256,mpicalc}.exe
-        crossc.{h,pc} libcrossc.a
-        include/onig{uruma,gnu,posix}.h libonig.a oniguruma.pc
-    )
-
-    do_uninstall q all "${_old_libs[@]}"
 }
 
 grep_or_sed() {
