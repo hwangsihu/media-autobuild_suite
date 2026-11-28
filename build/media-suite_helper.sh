@@ -157,10 +157,15 @@ vcs_get_latest_tag() {
 
 # vcs_set_url https://github.com/FFmpeg/FFmpeg.git
 vcs_set_url() {
-    if vcs_test_remote "$1"; then
+    local conf
+    conf=$'\n'$(git config --get-regexp '^remote\.origin\.(url|fetch|followremotehead)$')$'\n'
+    if [[ $conf != *$'\n'"remote.origin.url $1"$'\n'* ]] && vcs_test_remote "$1"; then
         git remote set-url origin "$1"
     fi
-    git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+    [[ $conf == *$'\nremote.origin.fetch +refs/heads/*:refs/remotes/origin/*\n'* ]] ||
+        git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+    [[ $conf == *$'\nremote.origin.followremotehead always\n'* ]] ||
+        git config remote.origin.followRemoteHEAD always
 }
 
 # vcs_clone https://gitlab.com/libtiff/libtiff.git tiff v4.1.0
@@ -194,7 +199,6 @@ vcs_fetch() (
     set -x
     [[ -f $(git rev-parse --git-dir)/shallow ]] && unshallow="--unshallow" || unshallow=''
     git fetch --all -Ppft $unshallow
-    git remote set-head -a origin
 )
 
 # do_mabs_clone "$vcsURL" "$vcsFolder" "$ref"
